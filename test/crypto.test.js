@@ -1,11 +1,10 @@
 /**
  * Tests for cryptographic functionality
  *
- * @author Alex Davidson
+ * @author; Alex Davidson
  */
 
-import rewire from "rewire";
-const workflow = rewire("../addon/compiled/test_compiled.js");
+const workflow = workflowSet();
 const sjcl = workflow.__get__("sjcl");
 const evaluateHkdf = workflow.__get__("evaluateHkdf");
 
@@ -48,7 +47,7 @@ describe("HKDF", () => {
     describe("edge cases", () => {
         test("numBlocks too high", () => {
             expect(() => {
-                evaluateHkdf(testVectors[0].ikm, 257*42, testVectors[0].info, testVectors[0].salt, testVectors[0].hash);
+                evaluateHkdf(testVectors[0].ikm, 257 * 42, testVectors[0].info, testVectors[0].salt, testVectors[0].hash);
             }).toThrowError("HKDF error");
         });
     });

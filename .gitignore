@@ -8,4 +8,5 @@ lcov.info
 coverage/
 dist/
 *.zip
-compiled/
+build.js
+test.js

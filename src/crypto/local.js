@@ -17,7 +17,20 @@
 /* exported getCurvePoints */
 /* exported getBigNumFromBytes */
 /* exported getActiveECSettings */
+/* exported verifyConfiguration */
+/* exported shake256 */
 "use strict";
+
+let PEM;
+let ASN1;
+if (typeof window !== "undefined") {
+    PEM = window.PEM;
+    ASN1 = window.ASN1;
+}
+
+let shake256 = () => {
+    return createShake256();
+};
 
 const BATCH_PROOF_PREFIX = "batch-proof=";
 const MASK = ["0xff", "0x1", "0x3", "0x7", "0xf", "0x1f", "0x3f", "0x7f"];
@@ -29,6 +42,11 @@ const PARSE_ERR = "[privacy-pass]: Error parsing proof";
 let CURVE;
 let CURVE_H2C_HASH;
 let CURVE_H2C_METHOD;
+let CURVE_H2C_LABEL;
+
+// 1.2.840.10045.3.1.7 point generation seed
+const INC_H2C_LABEL = sjcl.codec.hex.toBits("312e322e3834302e31303034352e332e312e3720706f696e742067656e65726174696f6e2073656564");
+const SSWU_H2C_LABEL = "H2C-P256-SHA256-SSWU-";
 
 /**
  * Sets the curve parameters for the current session based on the contents of
@@ -49,6 +67,7 @@ function initECSettings(h2cParams) {
             CURVE = sjcl.ecc.curves.c256;
             CURVE_H2C_HASH = sjcl.hash.sha256;
             CURVE_H2C_METHOD = methodStr;
+            CURVE_H2C_LABEL = methodStr === "increment" ? INC_H2C_LABEL : SSWU_H2C_LABEL;
             break;
         default:
             throw new Error("[privacy-pass]: Incompatible curve chosen: " + curveStr);
@@ -60,7 +79,7 @@ function initECSettings(h2cParams) {
  * @return {Object} Object containing the active curve and h2c configuration
  */
 function getActiveECSettings() {
-    return {curve: CURVE, hash: CURVE_H2C_HASH, method: CURVE_H2C_METHOD};
+    return {curve: CURVE, hash: CURVE_H2C_HASH, method: CURVE_H2C_METHOD, label: CURVE_H2C_LABEL};
 }
 
 /**
@@ -84,7 +103,6 @@ function blindPoint(P) {
     const bP = _scalarMult(bF, P);
     return {point: bP, blind: bF};
 }
-
 
 /**
  * unblindPoint takes an assumed-to-be blinded point Q and an accompanying
@@ -198,7 +216,7 @@ function sec1DecodeFromBytes(sec1Bytes) {
  */
 function decompressPoint(bytes) {
     const yTag = bytes[0];
-    const expLength = CURVE.r.bitLength()/8+1; // bitLength rounds up
+    const expLength = CURVE.r.bitLength() / 8 + 1; // bitLength rounds up
     if (yTag != 2 && yTag != 3) {
         throw new Error("[privacy-pass]: compressed point is invalid, bytes[0] = " + yTag);
     } else if (bytes.length !== expLength) {
@@ -287,6 +305,66 @@ function validResponseCompression(compression, setting) {
     return true;
 }
 
+// Commitments verification
+
+/**
+ * Parse a PEM-encoded signature.
+ * @param {string} pemSignature - A signature in PEM format.
+ * @return {sjcl.bitArray} a signature object for sjcl library.
+ */
+function parseSignaturefromPEM(pemSignature) {
+    try {
+        const bytes = PEM.parseBlock(pemSignature);
+        const json = ASN1.parse(bytes.der);
+        const r = sjcl.codec.bytes.toBits(json.children[0].value);
+        const s = sjcl.codec.bytes.toBits(json.children[1].value);
+        return sjcl.bitArray.concat(r, s);
+    } catch (e) {
+        throw new Error(
+            "[privacy-pass]: Failed on parsing commitment signature. " + e.message,
+        );
+    }
+}
+
+/**
+ * Parse a PEM-encoded public key.
+ * @param {string} pemPublicKey - A public key in PEM format.
+ * @return {sjcl.ecc.ecdsa.publicKey} a public key for sjcl library.
+ */
+function parsePublicKeyfromPEM(pemPublicKey) {
+    try {
+        let bytes = PEM.parseBlock(pemPublicKey);
+        let json = ASN1.parse(bytes.der);
+        let xy = json.children[1].value;
+        const point = sec1DecodeFromBytes(xy);
+        return new sjcl.ecc.ecdsa.publicKey(CURVE, point);
+    } catch (e) {
+        throw new Error(
+            "[privacy-pass]: Failed on parsing public key. " + e.message,
+        );
+    }
+}
+
+/**
+ * Verify the signature of the retrieved configuration portion.
+ * @param {Number} cfgId - ID of configuration being used.
+ * @param {json} config - commitments to verify
+ * @return {boolean} True, if the commitment has valid signature and is not
+ *                   expired; otherwise, throws an exception.
+ */
+function verifyConfiguration(cfgId, config) {
+    const sig = parseSignaturefromPEM(config.sig);
+    delete config.sig;
+    const msg = JSON.stringify(config);
+    const pk = parsePublicKeyfromPEM(getVerificationKey(cfgId));
+    const hmsg = sjcl.hash.sha256.hash(msg);
+    try {
+        return pk.verify(hmsg, sig);
+    } catch (error) {
+        throw new Error("[privacy-pass]: Invalid configuration verification.");
+    }
+}
+
 /**
  * DLEQ proof verification logic
  */
@@ -358,7 +436,7 @@ function recomputeComposites(tokens, signatures, pointG, pointH, prngName) {
     const prng = {name: prngName};
     switch (prng.name) {
         case "shake":
-            prng.func = createShake256();
+            prng.func = shake256();
             prng.func.update(seed, "hex");
             break;
         case "hkdf":
@@ -368,7 +446,7 @@ function recomputeComposites(tokens, signatures, pointG, pointH, prngName) {
             throw new Error(`Server specified PRNG is not compatible: ${prng.name}`);
     }
     let iter = -1;
-    for (let i=0; i<tokens.length; i++) {
+    for (let i = 0; i < tokens.length; i++) {
         iter++;
         const ci = computePRNGScalar(prng, seed, (new sjcl.bn(iter)).toBits());
         // Moved this check out of computePRNGScalar to here
@@ -401,7 +479,7 @@ function computePRNGScalar(prng, seed, salt) {
             out = prng.func.squeeze(32, "hex");
             break;
         case "hkdf":
-            out = sjcl.codec.hex.fromBits(prng.func(sjcl.codec.hex.toBits(seed), bitLen/8, sjcl.codec.utf8String.toBits("DLEQ_PROOF"), salt, CURVE_H2C_HASH));
+            out = sjcl.codec.hex.fromBits(prng.func(sjcl.codec.hex.toBits(seed), bitLen / 8, sjcl.codec.utf8String.toBits("DLEQ_PROOF"), salt, CURVE_H2C_HASH));
             break;
         default:
             throw new Error(`Server specified PRNG is not compatible: ${prng.name}`);
@@ -428,7 +506,7 @@ function computeSeed(chkM, chkZ, pointG, pointH) {
     const h = new CURVE_H2C_HASH(); // we use the h2c hash for convenience
     h.update(sec1EncodeToBits(pointG, compressed));
     h.update(sec1EncodeToBits(pointH, compressed));
-    for (let i=0; i<chkM.length; i++) {
+    for (let i = 0; i < chkM.length; i++) {
         h.update(sec1EncodeToBits(chkM[i].point, compressed));
         h.update(sec1EncodeToBits(chkZ.points[i], compressed));
     }
@@ -455,7 +533,7 @@ function evaluateHkdf(ikm, length, info, salt, hash) {
     mac.update(ikm);
     const prk = mac.digest();
 
-    const hashLength = Math.ceil(sjcl.bitArray.bitLength(prk)/8);
+    const hashLength = Math.ceil(sjcl.bitArray.bitLength(prk) / 8);
     const numBlocks = Math.ceil(length / hashLength);
     if (numBlocks > 255) {
         throw new Error(`[privacy-pass]: HKDF error, number of proposed iterations too large: ${numBlocks}`);
@@ -467,7 +545,7 @@ function evaluateHkdf(ikm, length, info, salt, hash) {
         const hmac = new sjcl.misc.hmac(prk, hash);
         const input = sjcl.bitArray.concat(
             sjcl.bitArray.concat(prev, info),
-            sjcl.codec.utf8String.toBits((String.fromCharCode(i + 1)))
+            sjcl.codec.utf8String.toBits((String.fromCharCode(i + 1))),
         );
         hmac.update(input);
         prev = hmac.digest();

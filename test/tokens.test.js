@@ -45,16 +45,14 @@ describe("check that null point errors are caught in token generation", () => {
     test("check that token generation happens correctly", () => {
         const tokens = GenerateNewTokens(3);
         expect(tokens.length === 3).toBeTruthy();
-        const consoleNew = workflow.__get__("console");
-        expect(consoleNew.warn).not.toBeCalled();
+        expect(consoleMock.warn).not.toBeCalled();
     });
 
     test("check that null tokens are caught and ignored", () => {
         workflow.__set__("CreateBlindToken", CreateBlindTokenMock);
         const tokens = GenerateNewTokens(3);
         expect(tokens.length === 2).toBeTruthy();
-        const consoleNew = workflow.__get__("console");
-        expect(consoleNew.warn).toBeCalled();
+        expect(consoleMock.warn).toBeCalled();
     });
 });
 
@@ -107,6 +105,23 @@ describe("building of redemption headers", () => {
         expect(h2cParams.curve === "p256").toBeTruthy();
         expect(h2cParams.hash === "sha256").toBeTruthy();
         expect(h2cParams.method === "increment").toBeTruthy();
+    });
+
+    test("header value is correct for SWU", () => {
+        workflow.__set__("h2cParams", () => {
+            return {
+                curve: "p256",
+                hash: "sha256",
+                method: "swu",
+            };
+        });
+        const contents = testBuildHeader();
+        // Test additional H2C parameters are constructed correctly
+        expect(contents.length === 3).toBeTruthy();
+        const h2cParams = JSON.parse(atob(contents[2]));
+        expect(h2cParams.curve === "p256").toBeTruthy();
+        expect(h2cParams.hash === "sha256").toBeTruthy();
+        expect(h2cParams.method === "swu").toBeTruthy();
     });
 });
 

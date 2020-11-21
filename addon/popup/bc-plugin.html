@@ -7,22 +7,21 @@
   </head>
 
 <body>
-  <div class="popup-http">
+  <div id="popup-http" class="popup-http">
     <div class="header">
       <span><img id="privacypass" src="../icons/ticket-1.svg"></span>
-      <h1>Privacy Pass</h1>
+      <span id="header-text"></span>
     </div>
-    <span id="stored">
-    	<script src="bc-plugin.js"></script>    
-    </span>
+
+    <script src="bc-plugin.js"></script>
   </div>
-    
+
   <div>
-    <a href="https://captcha.website" target="_blank">
-      <button type='button' class="button-style" formaction="captcha.website">Get More Passes</button>
+    <a href="#" id='redeem'>
+      <button type='button' class="button-style">Log CF Redemption to Console</button>
     </a>
   </div>
-  
+
   <div>
     <a href="#" id='clear'>
       <button type='button' class="button-style">Clear All Passes</button>

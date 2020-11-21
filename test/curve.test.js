@@ -29,11 +29,13 @@ const sec1DecodeFromBase64 = workflow.__get__("sec1DecodeFromBase64");
 let curve;
 let hash;
 let activeCurveParams;
+let label;
 beforeEach(() => {
-    setConfig(1);
+    setConfig(0);
     const settings = getActiveECSettings();
     curve = settings.curve;
     hash = settings.hash;
+    label = settings.label;
     activeCurveParams = {curve: "p256", hash: "sha256", method: "increment"};
 });
 
@@ -95,13 +97,20 @@ describe("check curve parameters are correct", () => {
 });
 
 // Test vectors taken from poc at
-// https://github.com/chris-wood/draft-sullivan-cfrg-hash-to-curve
-// (commit: cea8485220812a5d371deda25b5eca96bd7e6c0e)
+// https://github.com/cfrg/draft-irtf-cfrg-hash-to-curve.git
+// (tag: draft-irtf-cfrg-hash-to-curve-03)
+// (commit: 8150855f1529290e783bbd903dd7e4aef29c9b57)
 describe("hashing to p256", () => {
     const byteLength = 32;
     const wordLength = byteLength / 4;
 
     describe("affine test vectors", () => {
+        let sets;
+        beforeEach(() => {
+            activeCurveParams["method"] = "swu";
+            initECSettings(activeCurveParams);
+            sets = getActiveECSettings();
+        });
         const testVectors = [
             [],
             [0],
@@ -114,7 +123,7 @@ describe("hashing to p256", () => {
             {
                 t: "f4bf932eec234a64399ba0f4aa4c07817bbf3d5e23b9efcf004631fb9d1ef60a",
                 X: "0b05ff942eaf3c02a8d3d1bc1c3df582849dde7fef1e3030465605ca47be8695",
-                Y: "ca48b4a5112d113b222d3677ef0aa24cd65353ab51308cab871a3d3f2a8809e6",
+                Y: "35b74b59eed2eec5ddd2c98810f55db329acac55aecf735478e5c2c0d577f619",
             },
             {
                 t: "928fd78ea9288b1849d9129a923a67ab925ba22fd8ab6d20ecfd1bbb27972ae5",
@@ -124,7 +133,7 @@ describe("hashing to p256", () => {
             {
                 t: "f12ed3708b3e0ad507b1d562b4236b3c00232140b61e1a8fdcc244a88d5f3b07",
                 X: "d757d33753253ae290aa98071fd8ee5087617e8ce57542a5f4e1dcaddbd4cfed",
-                Y: "eef18a2a6b6fdbc5d17c95627493d0d8308a042538ceaa2394bac9ee352d7b0e",
+                Y: "110e75d49490243b2e836a9d8b6c2f27cf75fbdbc73155dc6b453611cad284f1",
             },
             {
                 t: "7128b7ac4f9506e36831804ede26275e0b8f14491c45ca3eb172e179ebb5bb67",
@@ -132,18 +141,16 @@ describe("hashing to p256", () => {
                 Y: "51a3742c76246a7b293434b6133e3ee21db3c53eacd666be51c24ddf64694571",
             },
         ];
-        for (let i=0; i<testVectors.length; i++) {
+        for (let i = 0; i < testVectors.length; i++) {
             test(`i=${i}`, () => {
-                const label = "H2C-P256-SHA256-SSWU-";
-                workflow.__set__("H2C_SEED", label); // use label from the draft
                 const alpha = sjcl.codec.bytes.toBits(testVectors[i]);
 
                 // check that h2base is consistent
-                const t = h2Base(alpha, curve, hash, label);
+                const t = h2Base(alpha, sets.curve, sets.hash, sets.label);
                 expect(sjcl.codec.hex.fromBits(t.toBits())).toEqual(expected[i].t);
 
                 // check that sswu in full is consistent
-                const point = simplifiedSWU(alpha, curve, hash);
+                const point = simplifiedSWU(alpha, sets.curve, sets.hash, sets.label);
                 expect(sjcl.codec.hex.fromBits(point.x.toBits())).toEqual(expected[i].X);
                 expect(sjcl.codec.hex.fromBits(point.y.toBits())).toEqual(expected[i].Y);
                 expect(point.isValid()).toBeTruthy();
@@ -152,11 +159,12 @@ describe("hashing to p256", () => {
     });
 
     test("affine random", () => {
-        for (let i=0; i<10; i++) {
+        for (let i = 0; i < 10; i++) {
             const random = sjcl.random.randomWords(wordLength, 10);
             const rndBits = sjcl.codec.bytes.toBits(random);
             const runH2C = function run() {
-                simplifiedSWU(rndBits, curve, hash);
+                const lbl = workflow.__get__("SSWU_H2C_LABEL");
+                simplifiedSWU(rndBits, curve, hash, lbl);
             };
             expect(runH2C).not.toThrowError();
         }
@@ -195,7 +203,7 @@ describe("hashing to p256", () => {
             const random = sjcl.random.randomWords(wordLength, 10);
             const rndBits = sjcl.codec.bytes.toBits(random);
             const runH2C = function run() {
-                hashAndInc(rndBits, hash);
+                hashAndInc(rndBits, hash, label);
             };
             expect(runH2C).not.toThrowError();
         }

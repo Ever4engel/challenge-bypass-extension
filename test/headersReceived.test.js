@@ -1,5 +1,4 @@
 /**
-
  * Integrations tests for when headers are received by the extension
  *
  * @author: Alex Davidson
@@ -16,8 +15,10 @@ const workflow = workflowSet();
 const CHL_BYPASS_SUPPORT = workflow.__get__("CHL_BYPASS_SUPPORT");
 const CHL_BYPASS_RESPONSE = workflow.__get__("CHL_BYPASS_RESPONSE");
 const chlVerificationError = workflow.__get__("chlVerificationError");
-const spendStatusCode = workflow.__get__("spendStatusCode");
 const chlConnectionError = workflow.__get__("chlConnectionError");
+const chlBadRequestError = workflow.__get__("chlBadRequestError");
+const chlUnknownError = workflow.__get__("chlUnknownError");
+const spendStatusCode = workflow.__get__("spendStatusCode");
 const isFaviconUrl = workflow.__get__("isFaviconUrl");
 const PPConfigs = workflow.__get__("PPConfigs");
 const LISTENER_URLS = workflow.__get__("LISTENER_URLS");
@@ -25,11 +26,14 @@ const EXAMPLE_HREF = "https://www.example.com";
 const processHeaders = workflow.__get__("processHeaders");
 const isBypassHeader = workflow.__get__("isBypassHeader");
 const chlCaptchaDomain = workflow.__get__("chlCaptchaDomain");
+const getReadyIssue = workflow.__get__("getReadyIssue");
+const setReadyIssue = workflow.__get__("setReadyIssue");
 
 const setNoTokens = (configId) => {
     setMock(bypassTokens(configId), "{}");
     setMock(bypassTokensCount(configId), 0);
 };
+
 /**
  * Tests
  * (Currently unable to test workflows that are dependent on cookies)
@@ -50,29 +54,55 @@ each(PPConfigs().filter((config) => config.id > 0).map((config) => [config.id]))
 
         describe("ensure that errors are handled properly", () => {
             const url = new URL(EXAMPLE_HREF);
-            test("connection error", () => {
-                localStorage.setItem("data", "some token");
+            const UNRECOGNISED_ERROR_CODE = 4;
+            const errorTypes = {
+                "connection": {
+                    code: chlConnectionError(),
+                    message: "[privacy-pass]: internal server connection error occurred",
+                },
+                "verification": {
+                    code: chlVerificationError(),
+                    message: `[privacy-pass]: token verification failed for ${url.href}`,
+                },
+                "bad-request": {
+                    code: chlBadRequestError(),
+                    message: "[privacy-pass]: server indicated a bad client request",
+                },
+                "unknown": {
+                    code: chlUnknownError(),
+                    message: "[privacy-pass]: unknown internal server error occurred",
+                },
+                "unrecognised": {
+                    code: UNRECOGNISED_ERROR_CODE,
+                    message: `[privacy-pass]: server sent unrecognised response code (${UNRECOGNISED_ERROR_CODE})`,
+                },
+            };
 
-                function processConnError() {
-                    const details = {
-                        responseHeaders: [{name: CHL_BYPASS_RESPONSE, value: chlConnectionError()}],
-                    };
-                    processHeaders(details, url);
-                }
+            const keys = Object.keys(errorTypes);
+            keys.forEach((k) => {
+                const error = errorTypes[k];
+                test(`${error} error`, () => {
+                    localStorage.setItem("data", "some token");
+                    function processError() {
+                        const details = {
+                            responseHeaders: [{name: CHL_BYPASS_RESPONSE, value: error.code}],
+                        };
+                        processHeaders(details, url);
+                    }
 
-                expect(processConnError).toThrowError(`error code: ${chlConnectionError()}`);
-                expect(localStorage.getItem("data")).toBeTruthy();
-            });
-            test("verification error", () => {
-                function processVerifyError() {
-                    const details = {
-                        responseHeaders: [{name: CHL_BYPASS_RESPONSE, value: chlVerificationError()}],
-                    };
-                    processHeaders(details, url);
-                }
-
-                expect(processVerifyError).toThrowError(`error code: ${chlVerificationError()}`);
-                expect(localStorage.getItem("data")).toBeFalsy();
+                    switch (error.code) {
+                        case UNRECOGNISED_ERROR_CODE:
+                            processError();
+                            expect(consoleMock.warn).toBeCalledWith(error.message);
+                            break;
+                        case chlVerificationError():
+                            expect(processError).toThrowError(error.message);
+                            expect(localStorage.getItem("data")).toBeTruthy();
+                            break;
+                        default:
+                            expect(processError).toThrowError(error.message);
+                    }
+                });
             });
         });
 
@@ -85,21 +115,21 @@ each(PPConfigs().filter((config) => config.id > 0).map((config) => [config.id]))
             test("header is valid", () => {
                 const header = {name: CHL_BYPASS_SUPPORT, value: `${configId}`};
                 found = isBypassHeader(header);
-                expect(found).toBeTruthy();
+                expect(found > 0).toBeTruthy();
             });
             test("header is invalid value", () => {
                 const header = {name: CHL_BYPASS_SUPPORT, value: "0"};
                 found = isBypassHeader(header);
-                expect(found).toBeFalsy();
+                expect(found).toEqual(-1);
             });
             test("header is invalid name", () => {
                 const header = {name: "Different-header-name", value: `${configId}`};
                 found = isBypassHeader(header);
-                expect(found).toBeFalsy();
+                expect(found).toEqual(-1);
             });
             test("config is reset if ID changes", () => {
-                const oldConfigId = configId + 1;
-                workflow.__with__({CONFIG_ID: oldConfigId})(() => {
+                const oldConfigId = configId == 1 ? 2 : 1;
+                workflow.__with__({CONFIG_ID: oldConfigId, recentConfigChange: false})(() => {
                     setMock(bypassTokensCount(oldConfigId), 10);
                     const header = {name: CHL_BYPASS_SUPPORT, value: `${configId}`};
                     const oldCount = getMock(bypassTokensCount(oldConfigId));
@@ -111,7 +141,7 @@ each(PPConfigs().filter((config) => config.id > 0).map((config) => [config.id]))
             });
             test("config is not reset if ID does not change", () => {
                 const oldConfigId = configId;
-                workflow.__with__({CONFIG_ID: oldConfigId})(() => {
+                workflow.__with__({CONFIG_ID: oldConfigId, recentConfigChange: false})(() => {
                     setMock(bypassTokensCount(oldConfigId), 10);
                     const header = {name: CHL_BYPASS_SUPPORT, value: `${configId}`};
                     const oldCount = getMock(bypassTokensCount(oldConfigId));
@@ -176,11 +206,11 @@ each(PPConfigs().filter((config) => config.id > 0).map((config) => [config.id]))
                 expect(updateIconMock).toBeCalledTimes(2);
             });
 
-            describe("setting of readySign", () => {
+            describe("setting of readyIssue", () => {
                 describe("signing enabled", () => {
                     beforeEach(() => {
                         workflow.__set__("doSign", () => true);
-                        workflow.__set__("readySign", false);
+                        setReadyIssue(configId, false);
                     });
 
                     test("no tokens", () => {
@@ -189,8 +219,7 @@ each(PPConfigs().filter((config) => config.id > 0).map((config) => [config.id]))
                         expect(ret.attempted).toBeFalsy();
                         expect(ret.xhr).toBeFalsy();
                         expect(ret.favicon).toBeFalsy();
-                        const readySign = workflow.__get__("readySign");
-                        expect(readySign).toBeTruthy();
+                        expect(getReadyIssue(configId)).toBeTruthy();
                         expect(updateIconMock).toBeCalledWith("!");
                     });
 
@@ -201,8 +230,7 @@ each(PPConfigs().filter((config) => config.id > 0).map((config) => [config.id]))
                         expect(ret.attempted).toBeFalsy();
                         expect(ret.xhr).toBeFalsy();
                         expect(ret.favicon).toBeFalsy();
-                        const readySign = workflow.__get__("readySign");
-                        expect(readySign).toBeFalsy();
+                        expect(getReadyIssue(configId)).toBeFalsy();
                     });
 
                     test("tokens > 0", () => {
@@ -210,8 +238,7 @@ each(PPConfigs().filter((config) => config.id > 0).map((config) => [config.id]))
                         expect(ret.attempted).toBeTruthy();
                         expect(ret.xhr).toBeFalsy();
                         expect(ret.favicon).toBeFalsy();
-                        const readySign = workflow.__get__("readySign");
-                        expect(readySign).toBeFalsy();
+                        expect(getReadyIssue(configId)).toBeFalsy();
                     });
 
                     test("tokens > 0 but captcha.website", () => {
@@ -220,8 +247,7 @@ each(PPConfigs().filter((config) => config.id > 0).map((config) => [config.id]))
                         expect(ret.attempted).toBeFalsy();
                         expect(ret.xhr).toBeFalsy();
                         expect(ret.favicon).toBeFalsy();
-                        const readySign = workflow.__get__("readySign");
-                        expect(readySign).toBeTruthy();
+                        expect(getReadyIssue(configId)).toBeTruthy();
                     });
 
                     test("redemption off", () => {
@@ -230,22 +256,24 @@ each(PPConfigs().filter((config) => config.id > 0).map((config) => [config.id]))
                             expect(ret.attempted).toBeFalsy();
                             expect(ret.xhr).toBeFalsy();
                             expect(ret.favicon).toBeFalsy();
-                            const readySign = workflow.__get__("readySign");
-                            expect(readySign).toBeTruthy();
+                            expect(getReadyIssue(configId)).toBeTruthy();
                         });
                     });
                 });
 
                 describe("signing disabled", () => {
+                    beforeEach(() => {
+                        setReadyIssue(configId, false);
+                    });
                     test("signing is not activated", () => {
-                        workflow.__with__({readySign: false, doSign: () => false})(() => {
+                        workflow.__with__({doSign: () => false})(() => {
                             header = {name: "Different-header-name", value: configId};
                             details.responseHeaders = [header];
                             const ret = processHeaders(details, url);
                             expect(ret.attempted).toBeFalsy();
                             expect(ret.xhr).toBeFalsy();
                             expect(ret.favicon).toBeFalsy();
-                            expect(workflow.__get__("readySign")).toBeFalsy();
+                            expect(getReadyIssue(configId)).toBeFalsy();
                         });
                     });
                 });

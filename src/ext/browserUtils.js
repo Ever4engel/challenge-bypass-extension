@@ -79,8 +79,8 @@ function fireRedeem(url, respTabId) {
     if (!isValidRedeemMethod(redeemMethod())) {
         throw new Error("[privacy-pass]: Incompatible redeem method selected.");
     }
+    setSpendFlag(url.host, true);
     if (redeemMethod() === "reload") {
-        setSpendFlag(url.host, true);
         const targetUrl = getTarget(respTabId);
         if (url.href === targetUrl) {
             chrome.tabs.update(respTabId, {url: targetUrl});
@@ -250,9 +250,14 @@ const isValidRedeemMethod = (method) => validRedemptionMethods().includes(method
 
 /**
  * Clears the commitments that are cached for the active configuration
+ * @param {Number} cfgId config ID initiating issue request
  */
-function clearCachedCommitments() {
-    localStorage.removeItem(CACHED_COMMITMENTS_STRING);
+function clearCachedCommitments(cfgId) {
+    let id = cfgId;
+    if (!id) {
+        id = getConfigId();
+    }
+    localStorage.removeItem(cachedCommitmentsKey(id));
 }
 
 /**
@@ -288,4 +293,4 @@ function clear() {
  * We use this function for updating the popup when tokens are cleared
  * The function is passed from bc-plugin.js
  */
-let UpdateCallback = function() {};
+let UpdateCallback = function() { };
