@@ -140,3 +140,21 @@ Depending on your browser settings, the local storage of your browser
 may be cleared when it is restarted. Privacy Pass stores passes in local
 storage and so these will also be cleared. This behavior may also be
 observed if you clear out the cache of your browser.
+
+## Known Issues
+
+### Extensions that modify user-agent or headers.
+
+There is a [conflict resolution|https://developer.chrome.com/docs/extensions/reference/webRequest/#conflict-resolution] happening when more than one extension tries
+to modify the headers of a request. According to documentation,
+the more recent installed extension is the one that can update
+headers, while others will fail.
+
+Compounded to that, Cloudflare will ignore clearance cookies when the
+user-agent request does not match the one used when obtaining the
+cookie.
+
+### hCaptcha support.
+
+As of version 3.x.x, support for hCaptcha tokens is paused. Only
+Cloudflare CAPTCHAs are supported by this extension.
