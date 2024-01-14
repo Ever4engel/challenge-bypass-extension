@@ -4,7 +4,6 @@ import { Callbacks, Provider } from '.';
 
 import { Storage } from '../storage';
 import Token from '../token';
-import axios from 'axios';
 import qs from 'qs';
 
 const ISSUE_HEADER_NAME = 'cf-chl-bypass';
@@ -14,10 +13,10 @@ const ISSUANCE_BODY_PARAM_NAME = 'blinded-tokens';
 const COMMITMENT_URL =
     'https://raw.githubusercontent.com/privacypass/ec-commitments/master/commitments-p256.json';
 
-const QUALIFIED_BODY_PARAMS = ['md', 'r'];
+const QUALIFIED_BODY_PARAMS = ['md'];
 
 const CHL_BYPASS_SUPPORT = 'cf-chl-bypass';
-const DEFAULT_ISSUING_HOSTNAME = 'captcha.website';
+const ISSUING_HOSTNAMES = ['captcha.website', 'issuance.privacypass.cloudflare.com'];
 
 const REFERER_QUERY_PARAM = '__cf_chl_tk';
 const QUERY_PARAM = '__cf_chl_f_tk';
@@ -91,7 +90,7 @@ export class CloudflareProvider implements Provider {
         }
 
         // Download the commitment
-        const { data } = await axios.get<Response>(COMMITMENT_URL);
+        const data: Response = await fetch(COMMITMENT_URL).then((r) => r.json());
         const commitment = data.CF[version as string];
         if (commitment === undefined) {
             throw new Error(`No commitment for the version ${version} is found`);
@@ -143,12 +142,13 @@ export class CloudflareProvider implements Provider {
             [ISSUE_HEADER_NAME]: CloudflareProvider.ID.toString(),
         };
 
-        const response = await axios.post<string, { data: string }>(url, body, {
+        const response = await fetch(url, {
+            method: 'POST',
+            body,
             headers,
-            responseType: 'text',
-        });
+        }).then((r) => r.text());
 
-        const { signatures } = qs.parse(response.data);
+        const { signatures } = qs.parse(response);
         if (signatures === undefined) {
             throw new Error('There is no signatures parameter in the issuance response.');
         }
@@ -317,7 +317,7 @@ export class CloudflareProvider implements Provider {
     ): chrome.webRequest.BlockingResponse | void {
         // Don't redeem a token in the issuing website.
         const url = new URL(details.url);
-        if (url.host === DEFAULT_ISSUING_HOSTNAME) {
+        if (ISSUING_HOSTNAMES.includes(url.host)) {
             return;
         }
 

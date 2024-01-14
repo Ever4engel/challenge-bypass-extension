@@ -1,6 +1,6 @@
 {
     "name": "privacy-pass",
-    "version": "3.0.3",
+    "version": "3.0.6",
     "contributors": [
         "Suphanat Chunhapanya <pop@cloudflare.com>",
         "Armando Faz <armfazh@cloudflare.com>"
@@ -22,10 +22,9 @@
     },
     "dependencies": {
         "asn1-parser": "1.1.8",
-        "axios": "0.23.0",
         "buffer": "6.0.3",
-        "keccak": "3.0.1",
-        "qs": "6.10.1",
+        "keccak": "3.0.2",
+        "qs": "6.10.3",
         "react": "17.0.2",
         "react-dom": "17.0.2",
         "react-redux": "7.2.5",
